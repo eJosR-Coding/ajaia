@@ -105,3 +105,15 @@ def test_validation_error_uses_single_shape(app):
     alice = login(app, "alice@demo.com")
     r = alice.put("/api/documents/1", json={"nope": 1})
     assert r.status_code == 422 and set(r.json()["error"]) == {"code", "message"}
+
+
+def test_versions_endpoints(app):
+    alice, carol = login(app, "alice@demo.com"), login(app, "carol@demo.com")
+    doc = alice.post("/api/documents", json={}).json()
+    r1 = alice.put(f"/api/documents/{doc['id']}", json={"content_html": "<p>one</p>", "revision": 1}).json()
+    alice.put(f"/api/documents/{doc['id']}", json={"content_html": "<p>two</p>", "revision": r1["revision"]})
+    versions = alice.get(f"/api/documents/{doc['id']}/versions").json()
+    assert len(versions) == 1 and "content_html" not in versions[0]
+    r = alice.post(f"/api/documents/{doc['id']}/versions/{versions[0]['id']}/restore")
+    assert r.status_code == 200 and r.json()["content_html"] == "<p>one</p>"
+    assert carol.get(f"/api/documents/{doc['id']}/versions").status_code == 404

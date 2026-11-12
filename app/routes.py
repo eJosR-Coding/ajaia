@@ -126,3 +126,15 @@ def list_shares(doc_id: int, user: User = Depends(current_user), svc=Depends(get
 def share_document(doc_id: int, body: ShareIn, user: User = Depends(current_user),
                    svc=Depends(get_service)):
     return user_out(svc.share(user, doc_id, body.email))
+
+
+@router.get("/documents/{doc_id}/versions")
+def list_versions(doc_id: int, user: User = Depends(current_user), svc=Depends(get_service)):
+    return [{"id": v.id, "title": v.title, "created_at": v.created_at.isoformat()}
+            for v in svc.list_versions(user, doc_id)]
+
+
+@router.post("/documents/{doc_id}/versions/{version_id}/restore")
+def restore_version(doc_id: int, version_id: int, user: User = Depends(current_user),
+                    svc=Depends(get_service)):
+    return doc_out(svc.restore_version(user, doc_id, version_id), user)

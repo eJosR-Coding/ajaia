@@ -101,3 +101,35 @@ def test_rename_validates_title(env):
     with pytest.raises(AppError) as e:
         svc.rename(repos.alice, doc.id, "   ")
     assert e.value.status == 400
+
+
+# --- version history (stretch) ---
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
+
+def test_at_most_one_snapshot_per_five_minutes(env):
+    repos, svc = env
+    doc = svc.create(repos.alice, "T")
+    d1 = svc.save(repos.alice, doc.id, "<p>one</p>", doc.revision)
+    d2 = svc.save(repos.alice, doc.id, "<p>two</p>", d1.revision)
+    d3 = svc.save(repos.alice, doc.id, "<p>three</p>", d2.revision)
+    assert len(svc.list_versions(repos.alice, doc.id)) == 1  # first save had empty content, 2nd snapshotted
+    # age the snapshot past the window, next save should snapshot again
+    old = repos.docs.latest_version(doc.id)
+    repos.docs._versions[doc.id][0] = type(old)(old.id, old.document_id, old.title,
+                                                old.content_html, datetime.now(timezone.utc) - timedelta(minutes=6))
+    svc.save(repos.alice, doc.id, "<p>four</p>", d3.revision)
+    assert len(svc.list_versions(repos.alice, doc.id)) == 2
+
+
+def test_restore_version(env):
+    repos, svc = env
+    doc = svc.create(repos.alice, "T")
+    d1 = svc.save(repos.alice, doc.id, "<p>one</p>", doc.revision)
+    d2 = svc.save(repos.alice, doc.id, "<p>two</p>", d1.revision)
+    v = svc.list_versions(repos.alice, doc.id)[0]
+    restored = svc.restore_version(repos.alice, doc.id, v.id)
+    assert restored.content_html == v.content_html and restored.revision == d2.revision + 1
+    with pytest.raises(AppError) as e:
+        svc.restore_version(repos.alice, doc.id, 999)
+    assert e.value.status == 404
