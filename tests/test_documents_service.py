@@ -133,3 +133,18 @@ def test_restore_version(env):
     with pytest.raises(AppError) as e:
         svc.restore_version(repos.alice, doc.id, 999)
     assert e.value.status == 404
+
+
+def test_save_survives_snapshot_failure(env, caplog):
+    repos, svc = env
+    doc = svc.create(repos.alice, "T")
+    first = svc.save(repos.alice, doc.id, "<p>one</p>", doc.revision)
+
+    def boom(*a, **k):
+        raise RuntimeError("versions table is cooked")
+
+    repos.docs.add_version = boom  # snapshot blows up AFTER the save committed
+    saved = svc.save(repos.alice, doc.id, "<p>two</p>", first.revision)
+    assert saved.revision == first.revision + 1
+    assert "two" in saved.content_html
+    assert "snapshot" in caplog.text.lower()
