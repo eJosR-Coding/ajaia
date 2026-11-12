@@ -9,3 +9,5 @@ dist
 supabase/
 .vercel
 .env*
+!.env.example
+.impeccable/

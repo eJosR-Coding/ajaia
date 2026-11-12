@@ -14,7 +14,7 @@
 | `VIDEO_URL.txt` | Walkthrough video link |
 | `app/`, `api/`, `db/` | FastAPI backend, Vercel entry point, Postgres schema and seed |
 | `frontend/` | React + Vite + TypeScript + TipTap app |
-| `tests/` | 48 backend tests (no database required) |
+| `tests/`, `frontend/src/*.test.ts` | 54 backend tests (no database required) and 61 frontend tests (vitest) |
 | `vercel.json`, `pyproject.toml`, `requirements*.txt`, `.env.example` | Config |
 
 ## Status
