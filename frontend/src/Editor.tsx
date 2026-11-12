@@ -5,6 +5,7 @@ import Underline from "@tiptap/extension-underline";
 import { api, ApiError, Doc, User, VersionMeta } from "./api";
 import { navigate } from "./App";
 import ShareDialog from "./ShareDialog";
+import Wordmark from "./Wordmark";
 
 type Status = "idle" | "saving" | "saved" | "error" | "conflict";
 const AUTOSAVE_MS = 1000;
@@ -29,7 +30,7 @@ export default function EditorPage({ docId, user, onLogout }: { docId: number; u
 
   const bar = (
     <header className="topbar">
-      <a href="#/" className="brand" style={{ color: "inherit", textDecoration: "none" }}>Ajaia Docs</a>
+      <a href="#/" className="brand" aria-label="Ajaia Docs home"><Wordmark /></a>
       <span className="spacer" />
       <span className="muted who">{user.name}</span>
       <button onClick={onLogout}>Log out</button>

@@ -1,5 +1,6 @@
 import { FormEvent, useState } from "react";
 import { api, ApiError, User } from "./api";
+import Wordmark from "./Wordmark";
 
 export default function Login({ onLogin }: { onLogin: (u: User) => void }) {
   const [email, setEmail] = useState("");
@@ -23,8 +24,9 @@ export default function Login({ onLogin }: { onLogin: (u: User) => void }) {
   return (
     <main className="center">
       <form className="card login" onSubmit={submit}>
-        <h1>Ajaia Docs</h1>
-        <p className="muted">Sign in to your documents.</p>
+        <Wordmark big />
+        <h1>Welcome back</h1>
+        <p className="muted">Sign in to pick up your documents.</p>
         <label>
           Email
           <input type="email" value={email} autoComplete="username" required autoFocus

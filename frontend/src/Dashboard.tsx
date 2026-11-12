@@ -1,6 +1,7 @@
 import { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, DocMeta, User } from "./api";
 import { navigate } from "./App";
+import Wordmark from "./Wordmark";
 
 function fmt(iso: string | null) {
   if (!iso) return "";
@@ -81,7 +82,7 @@ export default function Dashboard({ user, onLogout }: { user: User; onLogout: ()
   return (
     <div className="page">
       <header className="topbar">
-        <strong className="brand">Ajaia Docs</strong>
+        <Wordmark />
         <span className="spacer" />
         <span className="muted who">{user.name}</span>
         <button onClick={onLogout}>Log out</button>
