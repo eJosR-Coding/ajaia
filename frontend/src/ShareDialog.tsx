@@ -63,7 +63,7 @@ export default function ShareDialog({ docId, onClose }: { docId: number; onClose
           </div>
         </form>
         {error && <p id="share-error" className="error" role="alert">{error}</p>}
-        <h3 style={{ marginTop: "1.25rem", fontSize: "1rem" }}>People with access</h3>
+        <h3 className="access-title">People with access</h3>
         {loading ? (
           <p className="muted" role="status">Loading...</p>
         ) : shares.length === 0 ? (
