@@ -21,14 +21,14 @@ function relative(iso: string | null) {
   return rtf.format(Math.round(diff / pick[1]), pick[0]);
 }
 
-function DocList({ docs, empty, action, onAction, shared }: {
-  docs: DocMeta[]; empty: string; action: string; onAction: () => void; shared?: boolean;
+function DocList({ docs, empty, action, onAction, shared, disabled }: {
+  docs: DocMeta[]; empty: string; action: string; onAction: () => void; shared?: boolean; disabled?: boolean;
 }) {
   if (docs.length === 0) {
     return (
       <div className="empty">
         <p className="muted">{empty}</p>
-        <button onClick={onAction}>{action}</button>
+        <button onClick={onAction} disabled={disabled}>{action}</button>
       </div>
     );
   }
@@ -54,6 +54,7 @@ export default function Dashboard({ user, onLogout }: { user: User; onLogout: ()
   const [shared, setShared] = useState<DocMeta[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -61,12 +62,14 @@ export default function Dashboard({ user, onLogout }: { user: User; onLogout: ()
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setLoadFailed(false);
     try {
       const r = await api.list();
       setOwned(r.owned);
       setShared(r.shared);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Could not load documents");
+      setLoadFailed(true); // so we dont show "no documents" next to the error
     } finally {
       setLoading(false);
     }
@@ -75,6 +78,7 @@ export default function Dashboard({ user, onLogout }: { user: User; onLogout: ()
   useEffect(() => { void load(); }, [load]);
 
   async function createDoc() {
+    if (busy) return; // double-click guard
     setBusy(true);
     setError(null);
     try {
@@ -89,7 +93,7 @@ export default function Dashboard({ user, onLogout }: { user: User; onLogout: ()
   async function onFile(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = ""; // so picking the same file again still fires onChange
-    if (!file) return;
+    if (!file || busy) return;
     setImportError(null);
     // client-side guard mirrors the server so the user gets instant feedback
     if (file.size > 2 * 1024 * 1024) { setImportError("File is larger than 2 MB."); return; }
@@ -133,12 +137,12 @@ export default function Dashboard({ user, onLogout }: { user: User; onLogout: ()
         )}
         {loading ? (
           <p className="muted" role="status">Loading documents...</p>
-        ) : (
+        ) : loadFailed ? null : (
           <>
             <section aria-labelledby="h-mine">
               <h2 id="h-mine">My documents <span className="count">{owned.length}</span></h2>
               <DocList docs={owned} empty="No documents yet. Start with a blank page." action="Create your first document"
-                onAction={createDoc} />
+                onAction={createDoc} disabled={busy} />
             </section>
             <section aria-labelledby="h-shared">
               <h2 id="h-shared">Shared with me <span className="count">{shared.length}</span></h2>
