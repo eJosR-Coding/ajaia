@@ -1,7 +1,7 @@
 import { MutableRefObject, useCallback, useEffect, useReducer, useRef } from "react";
 import type { Editor as TipTap } from "@tiptap/react";
 import { api, ApiError, Doc } from "./api";
-import { Effect, SaveEvent, SaveModel, initialModel, transition } from "./saveMachine";
+import { Effect, SaveEvent, SaveModel, initialModel, normalizeHtml, transition } from "./saveMachine";
 
 const AUTOSAVE_MS = 1000;
 
@@ -18,6 +18,7 @@ export function useSaveMachine(opts: {
   const [, nudge] = useReducer((n: number) => n + 1, 0);
   const latest = useRef(initial.content_html);      // controller's own copy, never editor.getHTML() at send time
   const lastSaved = useRef(initial.content_html);
+  const inflight = useRef(initial.content_html);    // html of the newest SEND, what VERIFY compares against
   const timer = useRef<number | null>(null);
   const onServerDoc = useRef(opts.onServerDoc);
   onServerDoc.current = opts.onServerDoc;
@@ -41,6 +42,7 @@ export function useSaveMachine(opts: {
           const html = latest.current;
           // nothing changed since the last good save (e.g. undo back to it), no request needed
           if (html === lastSaved.current) { d({ type: "SAVE_OK", revision: fx.rev, html, epoch: fx.epoch }); break; }
+          inflight.current = html;
           api.save(id, html, fx.rev).then(
             (res) => {
               if (fx.epoch === model.current.epoch) lastSaved.current = html; // stale reply must not touch the base
@@ -48,8 +50,26 @@ export function useSaveMachine(opts: {
             },
             (e) => {
               if (e instanceof ApiError && e.status === 409) d({ type: "SAVE_409", html: latest.current, epoch: fx.epoch });
-              else d({ type: "SAVE_ERR", message: e instanceof ApiError ? e.message : "Save failed", epoch: fx.epoch });
+              else {
+                // a plain 4xx was rejected for sure; network, 5xx and unknown errors may have committed anyway
+                const ambiguous = !(e instanceof ApiError && e.status >= 400 && e.status < 500);
+                d({ type: "SAVE_ERR", message: e instanceof ApiError ? e.message : "Save failed", epoch: fx.epoch, ambiguous });
+              }
             },
+          );
+          break;
+        }
+        case "VERIFY": {
+          const epoch = model.current.epoch;
+          const sent = inflight.current;
+          api.get(id).then(
+            (doc) => {
+              if (normalizeHtml(doc.content_html) === normalizeHtml(sent)) {
+                if (epoch === model.current.epoch) lastSaved.current = sent; // server holds exactly this, so it counts as saved
+                d({ type: "VERIFY_SAME", revision: doc.revision, epoch });
+              } else d({ type: "VERIFY_DIFF", html: latest.current, epoch });
+            },
+            () => d({ type: "VERIFY_ERR", html: latest.current, epoch }),
           );
           break;
         }

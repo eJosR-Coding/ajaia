@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   hasUnsaved, initialModel, isBusy, statusLabel, transition,
-  type SaveEvent, type SaveModel, type SaveState,
+  normalizeHtml, type SaveEvent, type SaveModel, type SaveState,
 } from "./saveMachine";
 
 const doc = (revision: number, content_html = "<p>srv</p>") => ({ revision, content_html });
 const m = (save: SaveState, over: Partial<SaveModel> = {}): SaveModel =>
-  ({ save, rev: 5, epoch: 0, stash: null, ...over });
+  ({ save, rev: 5, epoch: 0, stash: null, maybeCommitted: false, ...over });
 const run = (model: SaveModel, ...events: SaveEvent[]) => {
   let cur = model;
   const effects: string[] = [];
@@ -127,7 +127,7 @@ describe("SAVE_409 / SAVE_ERR / RETRY", () => {
 describe("RELOAD_OK", () => {
   it("conflict idle -> synced, epoch+1, stash=mine, sets editor", () => {
     const r = transition(m({ t: "conflict", mine: "<p>m</p>", resync: "idle" }, { epoch: 1 }), { type: "RELOAD_OK", doc: doc(8) });
-    expect(r.model).toEqual({ save: { t: "synced", saved: true }, rev: 8, epoch: 2, stash: "<p>m</p>" });
+    expect(r.model).toEqual({ save: { t: "synced", saved: true }, rev: 8, epoch: 2, stash: "<p>m</p>", maybeCommitted: false });
     expect(r.effects).toEqual([{ type: "CLEAR_TIMER" }, { type: "SET_EDITOR_CONTENT", html: "<p>srv</p>" }]);
   });
   it("ignored while a keep-mine fetch is busy and outside conflict", () => {
@@ -141,7 +141,7 @@ describe("RELOAD_OK", () => {
 describe("RESTORE_OK", () => {
   it("from synced: no stash", () => {
     const r = transition(m({ t: "synced", saved: true }), { type: "RESTORE_OK", doc: doc(8), latest: "<p>srv</p>" });
-    expect(r.model).toEqual({ save: { t: "synced", saved: true }, rev: 8, epoch: 1, stash: null });
+    expect(r.model).toEqual({ save: { t: "synced", saved: true }, rev: 8, epoch: 1, stash: null, maybeCommitted: false });
     expect(r.effects).toEqual([{ type: "CLEAR_TIMER" }, { type: "SET_EDITOR_CONTENT", html: "<p>srv</p>" }]);
   });
   it("stashes unsaved local edits (dirty, saving, error)", () => {
@@ -186,7 +186,7 @@ describe("KEEP_MINE / KEEP_OK / KEEP_ERR", () => {
   });
   it("KEEP_OK -> saving clearStash, epoch+1, editor gets mine, then SEND on the new rev", () => {
     const r = transition(m({ t: "conflict", mine: "<p>mine</p>", resync: "busy" }, { epoch: 3 }), { type: "KEEP_OK", doc: doc(12) });
-    expect(r.model).toEqual({ save: { t: "saving", again: false, clearStash: true }, rev: 12, epoch: 4, stash: null });
+    expect(r.model).toEqual({ save: { t: "saving", again: false, clearStash: true }, rev: 12, epoch: 4, stash: null, maybeCommitted: false });
     expect(r.effects).toEqual([
       { type: "CLEAR_TIMER" },
       { type: "SET_EDITOR_CONTENT", html: "<p>mine</p>" },
@@ -265,6 +265,111 @@ describe("selectors", () => {
     expect(got).toEqual([false, false, true, true, true, false, true, true, true]);
   });
   it("initialModel starts quiet", () => {
-    expect(initialModel(4)).toEqual({ save: { t: "synced", saved: false }, rev: 4, epoch: 0, stash: null });
+    expect(initialModel(4)).toEqual({ save: { t: "synced", saved: false }, rev: 4, epoch: 0, stash: null, maybeCommitted: false });
+  });
+});
+
+// N1: a PUT can commit while its response is lost, the next save then 409s against our own write
+describe("N1 verify 409 after an ambiguous failure", () => {
+  const SAVING = { t: "saving", again: false, clearStash: false } as const;
+  const VERIFYING = { t: "verifying", again: false, clearStash: false } as const;
+  const lostThenRetry = () =>
+    run(m(SAVING), { type: "SAVE_ERR", message: "net", epoch: 0 }, { type: "RETRY" }).model;
+
+  it("SAVE_ERR flags maybeCommitted by default (network / 5xx / unknown)", () => {
+    expect(transition(m(SAVING), { type: "SAVE_ERR", message: "x", epoch: 0 }).model.maybeCommitted).toBe(true);
+    expect(transition(m(SAVING), { type: "SAVE_ERR", message: "x", epoch: 0, ambiguous: true }).model.maybeCommitted).toBe(true);
+  });
+  it("a plain 4xx is not ambiguous", () => {
+    expect(transition(m(SAVING), { type: "SAVE_ERR", message: "x", epoch: 0, ambiguous: false }).model.maybeCommitted).toBe(false);
+  });
+  it("a non-ambiguous error does not forget an earlier ambiguous one", () => {
+    const r = transition(m(SAVING, { maybeCommitted: true }), { type: "SAVE_ERR", message: "x", epoch: 0, ambiguous: false });
+    expect(r.model.maybeCommitted).toBe(true);
+  });
+  it("ambiguous error, RETRY, 409 -> VERIFY, not conflict", () => {
+    const r = transition(lostThenRetry(), { type: "SAVE_409", html: "<p>mine</p>", epoch: 0 });
+    expect(r.model.save).toEqual(VERIFYING);
+    expect(r.effects).toEqual([{ type: "VERIFY" }]);
+  });
+  it("EDIT during verifying sets again, no timer", () => {
+    const r = transition(m(VERIFYING, { maybeCommitted: true }), { type: "EDIT", html: "z" });
+    expect(r.model.save).toEqual({ t: "verifying", again: true, clearStash: false });
+    expect(r.effects).toEqual([]);
+  });
+  it("a 409 without a prior ambiguous failure goes straight to conflict", () => {
+    const r = transition(m(SAVING), { type: "SAVE_409", html: "latest", epoch: 0 });
+    expect(r.model.save).toEqual({ t: "conflict", mine: "latest", resync: "idle" });
+    expect(r.effects).toEqual([]);
+  });
+  it("VERIFY_SAME -> synced Saved with the server rev, flag cleared", () => {
+    const r = transition(m(VERIFYING, { maybeCommitted: true }), { type: "VERIFY_SAME", revision: 9, epoch: 0 });
+    expect(r.model.save).toEqual({ t: "synced", saved: true });
+    expect(r.model.rev).toBe(9);
+    expect(r.model.maybeCommitted).toBe(false);
+    expect(r.effects).toEqual([]);
+  });
+  it("VERIFY_SAME honours clearStash", () => {
+    const r = transition(m({ t: "verifying", again: false, clearStash: true }, { stash: "s", maybeCommitted: true }),
+      { type: "VERIFY_SAME", revision: 9, epoch: 0 });
+    expect(r.model.stash).toBeNull();
+  });
+  it("edits typed during VERIFY are not lost: VERIFY_SAME re-sends on the new rev", () => {
+    const r = transition(m({ t: "verifying", again: true, clearStash: false }, { maybeCommitted: true }),
+      { type: "VERIFY_SAME", revision: 9, epoch: 0 });
+    expect(r.model.save).toEqual(SAVING);
+    expect(r.model.rev).toBe(9);
+    expect(r.model.maybeCommitted).toBe(false);
+    expect(r.effects).toEqual([{ type: "SEND", rev: 9, epoch: 0 }]);
+  });
+  it("VERIFY_DIFF -> conflict with mine = latest, flag cleared", () => {
+    const r = transition(m({ t: "verifying", again: true, clearStash: false }, { maybeCommitted: true }),
+      { type: "VERIFY_DIFF", html: "<p>latest</p>", epoch: 0 });
+    expect(r.model.save).toEqual({ t: "conflict", mine: "<p>latest</p>", resync: "idle" });
+    expect(r.model.maybeCommitted).toBe(false);
+    expect(r.effects).toEqual([]);
+  });
+  it("VERIFY_ERR fails safe -> conflict with mine = latest", () => {
+    const r = transition(m(VERIFYING, { maybeCommitted: true }), { type: "VERIFY_ERR", html: "<p>latest</p>", epoch: 0 });
+    expect(r.model.save).toEqual({ t: "conflict", mine: "<p>latest</p>", resync: "idle" });
+    expect(r.model.maybeCommitted).toBe(false);
+  });
+  it("stale epoch and wrong state are ignored for VERIFY_*", () => {
+    const evs: SaveEvent[] = [
+      { type: "VERIFY_SAME", revision: 9, epoch: 0 },
+      { type: "VERIFY_DIFF", html: "x", epoch: 0 },
+      { type: "VERIFY_ERR", html: "x", epoch: 0 },
+    ];
+    for (const e of evs) {
+      const stale = m(VERIFYING, { epoch: 1, maybeCommitted: true });
+      expect(transition(stale, e)).toEqual({ model: stale, effects: [] });
+      for (const s of ALL) {
+        const model = m(s, { maybeCommitted: true });
+        expect(transition(model, e)).toEqual({ model, effects: [] });
+      }
+    }
+  });
+  it("RELOAD_OK, RESTORE_OK and KEEP_OK clear maybeCommitted", () => {
+    const flag = { maybeCommitted: true };
+    expect(transition(m({ t: "conflict", mine: "x", resync: "idle" }, flag), { type: "RELOAD_OK", doc: doc(8) }).model.maybeCommitted).toBe(false);
+    expect(transition(m({ t: "error", message: "x" }, flag), { type: "RESTORE_OK", doc: doc(8), latest: "z" }).model.maybeCommitted).toBe(false);
+    expect(transition(m({ t: "conflict", mine: "x", resync: "busy" }, flag), { type: "KEEP_OK", doc: doc(8) }).model.maybeCommitted).toBe(false);
+  });
+  it("SAVE_OK clears maybeCommitted", () => {
+    expect(transition(m(SAVING, { maybeCommitted: true }), { type: "SAVE_OK", revision: 6, html: "a", epoch: 0 }).model.maybeCommitted).toBe(false);
+  });
+  it("selectors treat verifying like saving", () => {
+    expect(statusLabel(m(VERIFYING))).toBe("saving");
+    expect(hasUnsaved(m(VERIFYING))).toBe(true);
+    expect(isBusy(m(VERIFYING))).toBe(true);
+  });
+  it("RETRY while verifying is a no-op", () => {
+    const model = m(VERIFYING);
+    expect(transition(model, { type: "RETRY" })).toEqual({ model, effects: [] });
+  });
+  it("normalizeHtml ignores outer and between-tag whitespace only", () => {
+    expect(normalizeHtml("  <p>a</p>\n  <p>b</p> ")).toBe(normalizeHtml("<p>a</p><p>b</p>"));
+    expect(normalizeHtml("<p>a  b</p>")).toBe(normalizeHtml("<p>a b</p>"));
+    expect(normalizeHtml("<p>a</p>")).not.toBe(normalizeHtml("<p>b</p>"));
   });
 });

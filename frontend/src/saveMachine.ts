@@ -5,6 +5,7 @@ export type SaveState =
   | { t: "synced"; saved: boolean }                       // saved=false renders nothing, true renders "Saved"
   | { t: "dirty" }                                        // debounce armed
   | { t: "saving"; again: boolean; clearStash: boolean }  // exactly one request in flight
+  | { t: "verifying"; again: boolean; clearStash: boolean } // 409 after an ambiguous failure: checking if the server already has our write
   | { t: "error"; message: string }
   | { t: "conflict"; mine: string; resync: "idle" | "busy" | { error: string } };
 
@@ -13,6 +14,7 @@ export interface SaveModel {
   rev: number;            // server revision we last saw
   epoch: number;          // bumps whenever the server doc replaces our base, stale responses get dropped
   stash: string | null;   // "my version" that lost a race, recoverable until dismissed
+  maybeCommitted: boolean; // last failure was ambiguous (lost response / 5xx): the server may already hold our write
 }
 
 type ServerDoc = { revision: number; content_html: string };
@@ -22,7 +24,10 @@ export type SaveEvent =
   | { type: "TIMER" }
   | { type: "SAVE_OK"; revision: number; html: string; epoch: number }
   | { type: "SAVE_409"; html: string; epoch: number }   // html = controller's latest, becomes conflict.mine
-  | { type: "SAVE_ERR"; message: string; epoch: number }
+  | { type: "SAVE_ERR"; message: string; epoch: number; ambiguous?: boolean } // ambiguous defaults to true (fail safe)
+  | { type: "VERIFY_SAME"; revision: number; epoch: number }  // server content == what we tried to save
+  | { type: "VERIFY_DIFF"; html: string; epoch: number }      // html = controller's latest, becomes conflict.mine
+  | { type: "VERIFY_ERR"; html: string; epoch: number }
   | { type: "RETRY" }
   | { type: "RELOAD_OK"; doc: ServerDoc }
   | { type: "RESTORE_OK"; doc: ServerDoc; latest: string } // latest = local html right now
@@ -36,15 +41,19 @@ export type Effect =
   | { type: "CLEAR_TIMER" }
   | { type: "SEND"; rev: number; epoch: number }          // html comes from the controller's latest
   | { type: "FETCH_LATEST" }
+  | { type: "VERIFY" }                                    // GET the doc, compare with the html we sent, dispatch VERIFY_*
   | { type: "SET_EDITOR_CONTENT"; html: string };
 
 export type StatusLabel = "idle" | "saving" | "saved" | "error" | "conflict";
 
 export const initialModel = (rev: number): SaveModel =>
-  ({ save: { t: "synced", saved: false }, rev, epoch: 0, stash: null });
+  ({ save: { t: "synced", saved: false }, rev, epoch: 0, stash: null, maybeCommitted: false });
 
 const none = (model: SaveModel) => ({ model, effects: [] as Effect[] });
 const SAVING = { t: "saving", again: false, clearStash: false } as const;
+
+// cheap compare for "did the server store what we sent": trim, drop whitespace between tags, collapse runs
+export const normalizeHtml = (h: string) => h.trim().replace(/>\s+</g, "><").replace(/\s+/g, " ");
 
 export function transition(model: SaveModel, ev: SaveEvent): { model: SaveModel; effects: Effect[] } {
   const s = model.save;
@@ -52,7 +61,7 @@ export function transition(model: SaveModel, ev: SaveEvent): { model: SaveModel;
     case "EDIT":
       if (s.t === "synced" || s.t === "error" || s.t === "dirty")
         return { model: { ...model, save: { t: "dirty" } }, effects: [{ type: "ARM_TIMER" }] };
-      if (s.t === "saving") return { model: { ...model, save: { ...s, again: true } }, effects: [] };
+      if (s.t === "saving" || s.t === "verifying") return { model: { ...model, save: { ...s, again: true } }, effects: [] };
       // conflict: keep stashing what the user types, no timer, no send
       return { model: { ...model, save: { ...s, mine: ev.html } }, effects: [] };
 
@@ -60,9 +69,11 @@ export function transition(model: SaveModel, ev: SaveEvent): { model: SaveModel;
       if (s.t !== "dirty") return none(model);
       return { model: { ...model, save: SAVING }, effects: [{ type: "SEND", rev: model.rev, epoch: model.epoch }] };
 
-    case "SAVE_OK": {
-      if (s.t !== "saving" || ev.epoch !== model.epoch) return none(model);
-      const base = { ...model, rev: ev.revision, stash: s.clearStash ? null : model.stash };
+    case "SAVE_OK":
+    case "VERIFY_SAME": {
+      if (s.t !== (ev.type === "SAVE_OK" ? "saving" : "verifying") || ev.epoch !== model.epoch) return none(model);
+      if (s.t !== "saving" && s.t !== "verifying") return none(model); // narrowing only, unreachable
+      const base = { ...model, rev: ev.revision, stash: s.clearStash ? null : model.stash, maybeCommitted: false };
       if (s.again) // edits landed mid-flight: re-send right away, never flash Saved
         return { model: { ...base, save: SAVING }, effects: [{ type: "SEND", rev: ev.revision, epoch: model.epoch }] };
       return { model: { ...base, save: { t: "synced", saved: true } }, effects: [] };
@@ -70,11 +81,22 @@ export function transition(model: SaveModel, ev: SaveEvent): { model: SaveModel;
 
     case "SAVE_409":
       if (s.t !== "saving" || ev.epoch !== model.epoch) return none(model);
+      // could be our own lost write: ask the server before crying conflict
+      if (model.maybeCommitted)
+        return { model: { ...model, save: { t: "verifying", again: s.again, clearStash: s.clearStash } }, effects: [{ type: "VERIFY" }] };
       return { model: { ...model, save: { t: "conflict", mine: ev.html, resync: "idle" } }, effects: [] };
+
+    case "VERIFY_DIFF":
+    case "VERIFY_ERR": // unsure = show the conflict, never risk losing data
+      if (s.t !== "verifying" || ev.epoch !== model.epoch) return none(model);
+      return { model: { ...model, save: { t: "conflict", mine: ev.html, resync: "idle" }, maybeCommitted: false }, effects: [] };
 
     case "SAVE_ERR":
       if (s.t !== "saving" || ev.epoch !== model.epoch) return none(model);
-      return { model: { ...model, save: { t: "error", message: ev.message } }, effects: [] };
+      return {
+        model: { ...model, save: { t: "error", message: ev.message }, maybeCommitted: model.maybeCommitted || ev.ambiguous !== false },
+        effects: [],
+      };
 
     case "RETRY":
       if (s.t !== "error") return none(model);
@@ -98,7 +120,7 @@ export function transition(model: SaveModel, ev: SaveEvent): { model: SaveModel;
       if (s.t !== "conflict" || s.resync !== "busy") return none(model);
       const epoch = model.epoch + 1;
       return {
-        model: { save: { t: "saving", again: false, clearStash: true }, rev: ev.doc.revision, epoch, stash: null },
+        model: { save: { t: "saving", again: false, clearStash: true }, rev: ev.doc.revision, epoch, stash: null, maybeCommitted: false },
         effects: [
           { type: "CLEAR_TIMER" },
           { type: "SET_EDITOR_CONTENT", html: s.mine }, // mine already holds keystrokes typed during the GET
@@ -119,7 +141,7 @@ export function transition(model: SaveModel, ev: SaveEvent): { model: SaveModel;
 // server doc wins: new base, new epoch, in-flight responses from the old epoch die
 function replaceBase(model: SaveModel, doc: ServerDoc, stash: string | null) {
   return {
-    model: { save: { t: "synced", saved: true } as SaveState, rev: doc.revision, epoch: model.epoch + 1, stash },
+    model: { save: { t: "synced", saved: true } as SaveState, rev: doc.revision, epoch: model.epoch + 1, stash, maybeCommitted: false },
     effects: [{ type: "CLEAR_TIMER" }, { type: "SET_EDITOR_CONTENT", html: doc.content_html }] as Effect[],
   };
 }
@@ -128,7 +150,7 @@ export function statusLabel(model: SaveModel): StatusLabel {
   const s = model.save;
   switch (s.t) {
     case "synced": return s.saved ? "saved" : "idle";
-    case "dirty": case "saving": return "saving";
+    case "dirty": case "saving": case "verifying": return "saving";
     case "error": return "error";
     case "conflict": return "conflict";
   }
@@ -136,4 +158,4 @@ export function statusLabel(model: SaveModel): StatusLabel {
 
 export const hasUnsaved = (model: SaveModel) => model.save.t !== "synced";
 export const isBusy = (model: SaveModel) =>
-  model.save.t === "saving" || model.save.t === "dirty" || model.save.t === "conflict";
+  model.save.t === "saving" || model.save.t === "verifying" || model.save.t === "dirty" || model.save.t === "conflict";
