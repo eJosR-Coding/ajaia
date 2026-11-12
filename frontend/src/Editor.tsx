@@ -5,6 +5,7 @@ import Underline from "@tiptap/extension-underline";
 import { api, ApiError, Doc, User, VersionMeta } from "./api";
 import { navigate } from "./App";
 import ShareDialog from "./ShareDialog";
+import Wordmark from "./Wordmark";
 
 type Status = "idle" | "saving" | "saved" | "error" | "conflict";
 const AUTOSAVE_MS = 1000;
@@ -29,7 +30,7 @@ export default function EditorPage({ docId, user, onLogout }: { docId: number; u
 
   const bar = (
     <header className="topbar">
-      <a href="#/" className="brand" style={{ color: "inherit", textDecoration: "none" }}>Ajaia Docs</a>
+      <a href="#/" className="brand" aria-label="Ajaia Docs home"><Wordmark /></a>
       <span className="spacer" />
       <span className="muted who">{user.name}</span>
       <button onClick={onLogout}>Log out</button>
@@ -249,30 +250,37 @@ function EditorBody({ initial }: { initial: Doc }) {
   return (
     <>
       <div className="editor-head">
-        <button type="button" aria-label="Back to documents" onClick={() => navigate("#/")}>&larr; Documents</button>
-        <input className="title-input" type="text" value={title} aria-label="Document title" maxLength={200}
-          onChange={(e) => setTitle(e.target.value)} onBlur={commitTitle}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
-            if (e.key === "Escape") { setTitle(savedTitle.current); }
-          }} />
-        <span className="badge">{initial.is_owner ? "Owner" : "Shared with you"}</span>
-        <span className={`status ${status === "saved" ? "ok" : status === "error" || status === "conflict" ? "bad" : "muted"}`}
-          role="status" aria-live="polite">
-          {/* aria-hidden keeps "Saving..." out of the live announcements, no per-keystroke chatter */}
-          {status === "saving" && <span aria-hidden="true">Saving...</span>}
-          {status === "saved" && "Saved"}
-          {status === "conflict" && "Not saved - conflict"}
-          {status === "error" && (
-            <>Error <button className="link" onClick={() => void save()}>Retry</button></>
-          )}
-        </span>
-        <button onClick={() => setShowVersions(true)}>History</button>
-        {initial.is_owner && <button className="primary" onClick={() => setSharing(true)}>Share</button>}
+        {/* real heading for AT + outline; the input below stays the editable control */}
+        <h1 className="sr-only">{title || "Untitled"}</h1>
+        <div className="head-title">
+          <button type="button" className="back" aria-label="Back to documents" onClick={() => navigate("#/")}>&larr; Documents</button>
+          <input className="title-input" type="text" value={title} aria-label="Document title" maxLength={200}
+            onChange={(e) => setTitle(e.target.value)} onBlur={commitTitle}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
+              if (e.key === "Escape") { setTitle(savedTitle.current); }
+            }} />
+        </div>
+        <div className="head-meta">
+          <span className="badge">{initial.is_owner ? "Owner" : "Shared with you"}</span>
+          <span className="spacer" />
+          <span className={`status ${status === "saved" ? "ok" : status === "error" || status === "conflict" ? "bad" : "muted"}`}
+            role="status" aria-live="polite">
+            {/* aria-hidden keeps "Saving..." out of the live announcements, no per-keystroke chatter */}
+            {status === "saving" && <span aria-hidden="true">Saving...</span>}
+            {status === "saved" && "Saved"}
+            {status === "conflict" && "Not saved - conflict"}
+            {status === "error" && (
+              <>Error <button className="link" onClick={() => void save()}>Retry</button></>
+            )}
+          </span>
+          <button onClick={() => setShowVersions(true)}>History</button>
+          {initial.is_owner && <button className="primary" onClick={() => setSharing(true)}>Share</button>}
+        </div>
       </div>
-      {titleError && <div className="banner-wrap"><p className="error" role="alert" style={{ maxWidth: 860, margin: ".5rem auto 0" }}>{titleError}</p></div>}
+      {titleError && <div className="banner-wrap"><p className="error wide" role="alert">{titleError}</p></div>}
       {saveError && (
-        <div className="banner-wrap"><p className="error" role="alert" style={{ maxWidth: 860, margin: ".5rem auto 0" }}>{saveError}</p></div>
+        <div className="banner-wrap"><p className="error wide" role="alert">{saveError}</p></div>
       )}
       <div className="editor-shell">
         <div className="sticky-stack">

@@ -1,21 +1,47 @@
 import { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, DocMeta, User } from "./api";
 import { navigate } from "./App";
+import Wordmark from "./Wordmark";
 
-function fmt(iso: string | null) {
+const FULL = { dateStyle: "medium", timeStyle: "short" } as const;
+const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto", style: "short" });
+
+// "2h ago" style label; falls back to a plain date once it's older than ~a month
+function relative(iso: string | null) {
   if (!iso) return "";
-  return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  const diff = new Date(iso).getTime() - Date.now(); // negative = past
+  const steps: [Intl.RelativeTimeFormatUnit, number][] = [
+    ["minute", 60_000], ["hour", 3_600_000], ["day", 86_400_000], ["week", 604_800_000],
+  ];
+  const abs = Math.abs(diff);
+  if (abs < 60_000) return "just now";
+  if (abs >= 30 * 86_400_000) return new Date(iso).toLocaleDateString(undefined, { dateStyle: "medium" });
+  let pick = steps[0];
+  for (const st of steps) if (abs >= st[1]) pick = st;
+  return rtf.format(Math.round(diff / pick[1]), pick[0]);
 }
 
-function DocList({ docs, empty }: { docs: DocMeta[]; empty: string }) {
-  if (docs.length === 0) return <p className="muted empty">{empty}</p>;
+function DocList({ docs, empty, action, onAction, shared }: {
+  docs: DocMeta[]; empty: string; action: string; onAction: () => void; shared?: boolean;
+}) {
+  if (docs.length === 0) {
+    return (
+      <div className="empty">
+        <p className="muted">{empty}</p>
+        <button onClick={onAction}>{action}</button>
+      </div>
+    );
+  }
   return (
     <ul className="doclist">
-      {docs.map((d) => (
-        <li key={d.id}>
+      {docs.map((d, i) => (
+        <li key={d.id} data-i={Math.min(i, 8)}>
           <a href={`#/doc/${d.id}`}>
             <span className="doctitle">{d.title || "Untitled"}</span>
-            <span className="docmeta">{d.updated_at ? `Edited ${fmt(d.updated_at)}` : ""}</span>
+            <span className="docmeta">
+              {shared && <span>Shared with you</span>}
+              {d.updated_at && <time dateTime={d.updated_at} title={new Date(d.updated_at).toLocaleString(undefined, FULL)}>Edited {relative(d.updated_at)}</time>}
+            </span>
           </a>
         </li>
       ))}
@@ -81,17 +107,21 @@ export default function Dashboard({ user, onLogout }: { user: User; onLogout: ()
   return (
     <div className="page">
       <header className="topbar">
-        <strong className="brand">Ajaia Docs</strong>
+        <Wordmark />
         <span className="spacer" />
         <span className="muted who">{user.name}</span>
         <button onClick={onLogout}>Log out</button>
       </header>
       <main className="container">
+        <h1>Your documents</h1>
         <div className="actions">
           <button className="primary" onClick={createDoc} disabled={busy}>New document</button>
-          <button onClick={() => fileRef.current?.click()} disabled={busy}>
-            Import .md or .txt (max 2 MB)
-          </button>
+          <div className="import">
+            <button onClick={() => fileRef.current?.click()} disabled={busy} aria-describedby="import-help">
+              Import .md or .txt
+            </button>
+            <span id="import-help" className="helper">Max 2 MB</span>
+          </div>
           <input ref={fileRef} type="file" accept=".md,.txt,text/markdown,text/plain" hidden
             aria-label="Import .md or .txt file" onChange={onFile} />
         </div>
@@ -106,12 +136,14 @@ export default function Dashboard({ user, onLogout }: { user: User; onLogout: ()
         ) : (
           <>
             <section aria-labelledby="h-mine">
-              <h2 id="h-mine">My documents</h2>
-              <DocList docs={owned} empty="Nothing here yet. Create a document or import one." />
+              <h2 id="h-mine">My documents <span className="count">{owned.length}</span></h2>
+              <DocList docs={owned} empty="No documents yet. Start with a blank page." action="Create your first document"
+                onAction={createDoc} />
             </section>
             <section aria-labelledby="h-shared">
-              <h2 id="h-shared">Shared with me</h2>
-              <DocList docs={shared} empty="Nobody has shared a document with you yet." />
+              <h2 id="h-shared">Shared with me <span className="count">{shared.length}</span></h2>
+              <DocList docs={shared} shared empty="Nobody has shared a document with you yet." action="Refresh"
+                onAction={load} />
             </section>
           </>
         )}
