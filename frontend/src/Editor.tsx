@@ -6,7 +6,7 @@ import { api, ApiError, Doc, User, VersionMeta } from "./api";
 import { navigate } from "./App";
 import ShareDialog from "./ShareDialog";
 
-type Status = "idle" | "saving" | "saved" | "error";
+type Status = "idle" | "saving" | "saved" | "error" | "conflict";
 const AUTOSAVE_MS = 1000;
 
 // wrapper: fetch the doc first so TipTap boots with real content (no flash of empty editor)
@@ -94,6 +94,8 @@ function EditorBody({ initial }: { initial: Doc }) {
   const [status, setStatus] = useState<Status>("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
+  // "my version": local html that lost a 409 race. stays recoverable until the user dismisses it
+  const [mine, setMine] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
   const [showVersions, setShowVersions] = useState(false);
 
@@ -108,12 +110,13 @@ function EditorBody({ initial }: { initial: Doc }) {
   const lastSavedHtml = useRef(initial.content_html);
   const editorRef = useRef<TipTap | null>(null);
 
-  const save = useCallback(async () => {
+  // resolves true when the doc is in sync with the server afterwards
+  const save = useCallback(async (): Promise<boolean> => {
     const editor = editorRef.current;
-    if (!editor || conflictRef.current) return;
-    if (inflight.current) { queued.current = true; return; } // one request at a time, no revision races
+    if (!editor || conflictRef.current) return false;
+    if (inflight.current) { queued.current = true; return false; } // one request at a time, no revision races
     const html = editor.getHTML();
-    if (html === lastSavedHtml.current) { setStatus("saved"); return; }
+    if (html === lastSavedHtml.current) { setStatus("saved"); return true; }
     inflight.current = true;
     setStatus("saving");
     try {
@@ -122,16 +125,19 @@ function EditorBody({ initial }: { initial: Doc }) {
       lastSavedHtml.current = html;
       setSaveError(null);
       setStatus("saved");
+      return true;
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
-        // someone else won the race. do NOT overwrite, just stop and tell the user
+        // someone else won the race. do NOT overwrite, stash our version so nothing is lost
         conflictRef.current = true;
+        setMine(html);
         setConflict(true);
-        setStatus("idle");
+        setStatus("conflict");
       } else {
         setSaveError(e instanceof ApiError ? e.message : "Save failed");
         setStatus("error");
       }
+      return false;
     } finally {
       inflight.current = false;
       if (queued.current && !conflictRef.current) { queued.current = false; void save(); }
@@ -150,7 +156,11 @@ function EditorBody({ initial }: { initial: Doc }) {
     extensions: [StarterKit, Underline],
     content: initial.content_html,
     editorProps: { attributes: { "aria-label": "Document body", role: "textbox", "aria-multiline": "true" } },
-    onUpdate: ({ editor }) => { latestHtml.current = editor.getHTML(); schedule(); },
+    onUpdate: ({ editor }) => {
+      latestHtml.current = editor.getHTML();
+      if (conflictRef.current) setMine(latestHtml.current); // keep stashing edits made during a conflict
+      schedule();
+    },
   });
   editorRef.current = editor;
 
@@ -189,6 +199,34 @@ function EditorBody({ initial }: { initial: Doc }) {
     setStatus("saved");
   }
 
+  // re-base onto the server revision but keep local content, so the next save overwrites on purpose
+  async function keepMine() {
+    if (mine === null || !editor) return;
+    try {
+      const d = await api.get(id);
+      if (timer.current) { window.clearTimeout(timer.current); timer.current = null; }
+      queued.current = false;
+      revision.current = d.revision;
+      lastSavedHtml.current = d.content_html;
+      savedTitle.current = d.title;
+      setTitle(d.title);
+      editor.commands.setContent(mine, false);
+      latestHtml.current = editor.getHTML();
+      conflictRef.current = false;
+      setConflict(false);
+      setSaveError(null);
+      if (await save()) setMine(null);
+    } catch (e) {
+      setSaveError(e instanceof ApiError ? e.message : "Could not re-sync with the latest version");
+    }
+  }
+
+  async function copyMine() {
+    if (mine === null) return false;
+    try { await navigator.clipboard.writeText(mine); return true; }
+    catch { return false; } // no clipboard api or permission denied, caller shows the manual fallback
+  }
+
   async function reload() {
     try { applyServerDoc(await api.get(id)); }
     catch (e) { setSaveError(e instanceof ApiError ? e.message : "Reload failed"); }
@@ -219,10 +257,12 @@ function EditorBody({ initial }: { initial: Doc }) {
             if (e.key === "Escape") { setTitle(savedTitle.current); }
           }} />
         <span className="badge">{initial.is_owner ? "Owner" : "Shared with you"}</span>
-        <span className={`status ${status === "saved" ? "ok" : status === "error" ? "bad" : "muted"}`}
+        <span className={`status ${status === "saved" ? "ok" : status === "error" || status === "conflict" ? "bad" : "muted"}`}
           role="status" aria-live="polite">
-          {status === "saving" && "Saving..."}
+          {/* aria-hidden keeps "Saving..." out of the live announcements, no per-keystroke chatter */}
+          {status === "saving" && <span aria-hidden="true">Saving...</span>}
           {status === "saved" && "Saved"}
+          {status === "conflict" && "Not saved - conflict"}
           {status === "error" && (
             <>Error <button className="link" onClick={() => void save()}>Retry</button></>
           )}
@@ -231,20 +271,31 @@ function EditorBody({ initial }: { initial: Doc }) {
         {initial.is_owner && <button className="primary" onClick={() => setSharing(true)}>Share</button>}
       </div>
       {titleError && <div className="banner-wrap"><p className="error" role="alert" style={{ maxWidth: 860, margin: ".5rem auto 0" }}>{titleError}</p></div>}
-      {status === "error" && saveError && (
+      {saveError && (
         <div className="banner-wrap"><p className="error" role="alert" style={{ maxWidth: 860, margin: ".5rem auto 0" }}>{saveError}</p></div>
       )}
-      {conflict && (
-        <div className="banner-wrap">
-          <div className="banner" role="alert">
-            <strong>This document was changed elsewhere.</strong>
-            <span>Your latest edits were not saved so nothing got overwritten.</span>
-            <button onClick={reload}>Reload</button>
-          </div>
-        </div>
-      )}
       <div className="editor-shell">
-        {editor && <Toolbar editor={editor} />}
+        <div className="sticky-stack">
+          {editor && <Toolbar editor={editor} />}
+          {conflict && (
+            <div className="banner" role="alert">
+              <div className="banner-main">
+                <strong>This document was changed elsewhere.</strong>
+                <span>Your latest edits were not saved so nothing got overwritten.</span>
+              </div>
+              <div className="banner-actions">
+                <button onClick={reload}>Reload latest</button>
+                <button onClick={keepMine}>Keep editing mine</button>
+              </div>
+              {mine !== null && <MineVersion html={mine} onCopy={copyMine} defaultOpen />}
+            </div>
+          )}
+          {!conflict && mine !== null && (
+            <div className="banner quiet" role="region" aria-label="Your unsaved version">
+              <MineVersion html={mine} onCopy={copyMine} onDismiss={() => setMine(null)} />
+            </div>
+          )}
+        </div>
         <div className="paper" onClick={() => editor?.commands.focus()}>
           <EditorContent editor={editor} />
         </div>
@@ -256,6 +307,35 @@ function EditorBody({ initial }: { initial: Doc }) {
           onRestored={(d) => { applyServerDoc(d); setShowVersions(false); }} />
       )}
     </>
+  );
+}
+
+function MineVersion({ html, onCopy, onDismiss, defaultOpen }: {
+  html: string; onCopy: () => Promise<boolean>; onDismiss?: () => void; defaultOpen?: boolean;
+}) {
+  const [note, setNote] = useState("");
+  const area = useRef<HTMLTextAreaElement>(null);
+  const details = useRef<HTMLDetailsElement>(null);
+
+  async function copy() {
+    if (await onCopy()) { setNote("Copied to clipboard."); return; }
+    // fallback: open the box and pre-select the text so Ctrl+C just works
+    if (details.current) details.current.open = true;
+    area.current?.focus();
+    area.current?.select();
+    setNote("Could not copy automatically. Press Ctrl+C to copy the selected text.");
+  }
+
+  return (
+    <details className="mine" ref={details} open={defaultOpen}>
+      <summary>Your unsaved version</summary>
+      <textarea ref={area} readOnly value={html} rows={4} aria-label="Your unsaved version as HTML" />
+      <div className="banner-actions">
+        <button onClick={copy}>Copy my version</button>
+        {onDismiss && <button onClick={onDismiss}>Dismiss</button>}
+        <span role="status" className="mine-note">{note}</span>
+      </div>
+    </details>
   );
 }
 

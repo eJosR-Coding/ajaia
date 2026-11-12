@@ -3,6 +3,7 @@
   --accent: #2b5fd9; --accent-text: #fff; --accent-soft: #e6edfc;
   --danger: #b3261e; --danger-soft: #fdeceb; --ok: #1e7a46; --warn-soft: #fff4d6; --warn: #7a5b00;
   --radius: 8px;
+  --topbar-h: 3.1rem; /* single source for the sticky offsets below */
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
@@ -52,6 +53,7 @@ label input { margin-top: .3rem; font-weight: 400; }
 .topbar {
   display: flex; align-items: center; gap: .75rem; padding: .6rem 1rem;
   background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5;
+  min-height: var(--topbar-h);
 }
 .brand { font-size: 1.05rem; }
 .who { font-size: .9rem; }
@@ -80,11 +82,20 @@ section h2 { font-size: 1.05rem; color: var(--muted); font-weight: 600; text-tra
 .status { font-size: .85rem; min-width: 5.5rem; text-align: right; }
 .status.ok { color: var(--ok); }
 .status.bad { color: var(--danger); }
-.banner { max-width: 860px; margin: .75rem auto 0; padding: .7rem 1rem; border-radius: var(--radius); background: var(--warn-soft); color: var(--warn); display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+.sticky-stack { position: sticky; top: var(--topbar-h); z-index: 4; }
+.banner { padding: .7rem 1rem; background: var(--danger-soft); color: var(--danger); border: 1px solid var(--border); border-top: 0; display: flex; align-items: center; justify-content: space-between; gap: .5rem .75rem; flex-wrap: wrap; }
+.banner.quiet { background: var(--warn-soft); color: var(--warn); }
+.banner-main { display: flex; flex-direction: column; gap: .1rem; min-width: 0; flex: 1 1 260px; }
+.banner-actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.banner button { color: var(--text); }
+.mine { flex: 1 0 100%; }
+.mine summary { cursor: pointer; font-weight: 600; margin-bottom: .4rem; }
+.mine textarea { display: block; width: 100%; margin-bottom: .5rem; padding: .5rem .7rem; font: .85rem/1.4 ui-monospace, monospace; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); resize: vertical; }
+.mine-note { font-size: .85rem; }
 .banner-wrap { padding: 0 1rem; }
 .editor-shell { max-width: 860px; margin: .75rem auto 3rem; padding: 0 1rem; }
 .toolbar {
-  display: flex; gap: .3rem; flex-wrap: wrap; padding: .4rem; position: sticky; top: 49px; z-index: 4;
+  display: flex; gap: .3rem; flex-wrap: wrap; padding: .4rem;
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0;
 }
 .toolbar button { min-width: 2.4rem; padding: .35rem .6rem; border-color: transparent; background: transparent; }
