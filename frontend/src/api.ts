@@ -17,6 +17,7 @@ export interface DocMeta {
 }
 export interface Doc extends DocMeta { content_html: string }
 export interface VersionMeta { id: number; title: string; created_at: string }
+export interface VersionDetail extends VersionMeta { content_html: string }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   let res: Response;
@@ -58,6 +59,7 @@ export const api = {
   shares: (id: number) => request<User[]>("GET", `/documents/${id}/shares`),
   share: (id: number, email: string) => request<User>("POST", `/documents/${id}/shares`, { email }),
   versions: (id: number) => request<VersionMeta[]>("GET", `/documents/${id}/versions`),
+  version: (id: number, vid: number) => request<VersionDetail>("GET", `/documents/${id}/versions/${vid}`),
   restore: (id: number, vid: number) =>
     request<Doc>("POST", `/documents/${id}/versions/${vid}/restore`),
 };

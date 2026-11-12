@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { EditorContent, useEditor, Editor as TipTap } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
-import { api, ApiError, Doc, User, VersionMeta } from "./api";
+import { api, ApiError, Doc, User, VersionDetail, VersionMeta } from "./api";
 import { navigate } from "./App";
 import ShareDialog from "./ShareDialog";
 import Wordmark from "./Wordmark";
@@ -310,7 +310,7 @@ function EditorBody({ initial }: { initial: Doc }) {
       </div>
       {sharing && <ShareDialog docId={id} onClose={() => setSharing(false)} />}
       {showVersions && (
-        <VersionsDialog docId={id} busy={status === "saving" || conflict}
+        <VersionsDialog docId={id} busy={status === "saving" || conflict} currentHtml={latestHtml.current}
           onClose={() => setShowVersions(false)}
           onRestored={(d) => { applyServerDoc(d); setShowVersions(false); }} />
       )}
@@ -347,18 +347,23 @@ function MineVersion({ html, onCopy, onDismiss, defaultOpen }: {
   );
 }
 
-function VersionsDialog({ docId, busy, onClose, onRestored }: {
-  docId: number; busy: boolean; onClose: () => void; onRestored: (d: Doc) => void;
+function VersionsDialog({ docId, busy, currentHtml, onClose, onRestored }: {
+  docId: number; busy: boolean; currentHtml: string; onClose: () => void; onRestored: (d: Doc) => void;
 }) {
   const [versions, setVersions] = useState<VersionMeta[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [working, setWorking] = useState<number | null>(null);
-  const [confirming, setConfirming] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [detail, setDetail] = useState<VersionDetail | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0); // bump to refetch the preview
+  const [working, setWorking] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
-    api.versions(docId).then(setVersions)
+    api.versions(docId)
+      .then((vs) => { setVersions(vs); if (vs.length > 0) setSelectedId(vs[0].id); }) // newest row auto-selected
       .catch((e) => setError(e instanceof ApiError ? e.message : "Could not load history"));
   }, [docId]);
 
@@ -368,18 +373,41 @@ function VersionsDialog({ docId, busy, onClose, onRestored }: {
     headingRef.current?.focus();
   }, []);
 
-  async function restore(v: VersionMeta) {
-    setWorking(v.id);
-    setError(null);
-    try {
-      const d = await api.restore(docId, v.id);
-      dialogRef.current?.close(); // close natively first so focus goes back to the opener
-      onRestored(d);
-    } catch (e) { setError(e instanceof ApiError ? e.message : "Restore failed"); setWorking(null); setConfirming(null); }
+  // fetch the selected snapshot; `alive` drops stale responses when the user clicks around fast
+  useEffect(() => {
+    if (selectedId === null) return;
+    let alive = true;
+    setDetail(null);
+    setPreviewError(null);
+    api.version(docId, selectedId)
+      .then((d) => alive && setDetail(d))
+      .catch((e) => alive && setPreviewError(e instanceof ApiError ? e.message : "Could not load this version"));
+    return () => { alive = false; };
+  }, [docId, selectedId, retry]);
+
+  function select(id: number) {
+    if (working || id === selectedId) return;
+    setSelectedId(id);
+    setConfirming(false);
   }
 
+  async function restore() {
+    if (selectedId === null) return;
+    setWorking(true);
+    setError(null);
+    try {
+      const d = await api.restore(docId, selectedId);
+      dialogRef.current?.close(); // close natively first so focus goes back to the opener
+      onRestored(d);
+    } catch (e) { setError(e instanceof ApiError ? e.message : "Restore failed"); setWorking(false); setConfirming(false); }
+  }
+
+  const total = versions?.length ?? 0;
+  const index = versions?.findIndex((v) => v.id === selectedId) ?? -1;
+  const fmt = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+
   return (
-    <dialog ref={dialogRef} className="card dialog" aria-labelledby="hist-title"
+    <dialog ref={dialogRef} className="card dialog dialog-wide" aria-labelledby="hist-title"
       onClose={onClose}
       onClick={(e) => { if (e.target === e.currentTarget) dialogRef.current?.close(); }}>
       <div className="dialog-body">
@@ -388,29 +416,63 @@ function VersionsDialog({ docId, busy, onClose, onRestored }: {
           <button onClick={() => dialogRef.current?.close()} aria-label="Close version history">Close</button>
         </div>
         {error && <p className="error" role="alert">{error}</p>}
-        {busy && <p className="muted">Restore is available once saving finishes.</p>}
         {!versions && !error && <p className="muted" role="status">Loading...</p>}
         {versions && versions.length === 0 && <p className="muted">No earlier versions yet. Snapshots appear as you edit.</p>}
         {versions && versions.length > 0 && (
-          <ul className="plainlist">
-            {versions.map((v) => (
-              <li key={v.id}>
-                <span>{new Date(v.created_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</span>
-                {confirming === v.id ? (
-                  <span className="confirm-row">
-                    <button className="primary" disabled={busy || working !== null} onClick={() => restore(v)}>
-                      {working === v.id ? "Restoring..." : "Confirm restore"}
-                    </button>
-                    <button disabled={working !== null} onClick={() => setConfirming(null)}>Cancel</button>
-                  </span>
-                ) : (
-                  <button disabled={busy || working !== null} onClick={() => setConfirming(v.id)}>Restore</button>
-                )}
-              </li>
-            ))}
-          </ul>
+          <div className="history">
+            <ul className="plainlist history-list" aria-label="Saved versions">
+              {versions.map((v, i) => (
+                <li key={v.id}>
+                  <button type="button" className="history-row" aria-pressed={v.id === selectedId}
+                    aria-current={v.id === selectedId ? "true" : undefined}
+                    disabled={working} onClick={() => select(v.id)}>
+                    <span className="history-when">{fmt(v.created_at)}</span>
+                    <span className="muted history-n">State {total - i} of {total}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <div className="history-preview">
+              {previewError ? (
+                <div>
+                  <p className="error" role="alert">{previewError}</p>
+                  <button onClick={() => setRetry((n) => n + 1)}>Retry</button>
+                </div>
+              ) : !detail ? (
+                <p className="muted" role="status">Loading preview...</p>
+              ) : (
+                <>
+                  <div className="preview-head">
+                    <h3>{detail.title}</h3>
+                    <p className="muted preview-meta">
+                      Saved state {total - index} of {total} &middot; <time dateTime={detail.created_at}>{fmt(detail.created_at)}</time>
+                    </p>
+                    {detail.content_html === currentHtml && (
+                      <p className="preview-note">Current version: this matches what is in the editor now.</p>
+                    )}
+                  </div>
+                  {/* server sanitizes with an nh3 allowlist (no attrs) on write and again on read, so raw HTML is safe here */}
+                  <div className="paper preview-paper" aria-label="Version preview"
+                    dangerouslySetInnerHTML={{ __html: detail.content_html }} />
+                  <div className="preview-actions">
+                    {confirming ? (
+                      <span className="confirm-row">
+                        <button className="primary" disabled={busy || working} onClick={restore}>
+                          {working ? "Restoring..." : "Confirm restore"}
+                        </button>
+                        <button disabled={working} onClick={() => setConfirming(false)}>Cancel</button>
+                      </span>
+                    ) : (
+                      <button disabled={busy || working} onClick={() => setConfirming(true)}>Restore this version</button>
+                    )}
+                    {busy && <span className="muted">Restore is available once saving finishes.</span>}
+                  </div>
+                  {confirming && <p className="muted" role="status">Restoring replaces the current text with this version.</p>}
+                </>
+              )}
+            </div>
+          </div>
         )}
-        {confirming !== null && <p className="muted" role="status">Restoring replaces the current text with this version.</p>}
       </div>
     </dialog>
   );
