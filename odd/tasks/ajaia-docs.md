@@ -14,7 +14,7 @@ Authorized scope: local code, tests, docs in this repo. NOT authorized: Supabase
 - [x] T6 Deploy (blocked on user: Supabase + Vercel credentials)
 
 ## Evidence
-T1,T2,T4: commits 0e8238f aeea846 7427a7c 6962f3f; uv run pytest -q = 48 passed (parent re-ran). Postgres paths untested against a real DB.
+T1,T2,T4: backend branch merged into dev; uv run pytest -q passed (parent re-ran; 54 tests today). Postgres paths untested against a real DB.
 
 ## Next step
 T5 docs on feat/docs (user reviews)
