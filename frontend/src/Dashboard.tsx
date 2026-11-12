@@ -58,6 +58,8 @@ export default function Dashboard({ user, onLogout }: { user: User; onLogout: ()
   const [importError, setImportError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const alive = useRef(true); // false once we unmount, so a slow create/import never yanks the user to a doc
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []); // set true again for strict mode remounts
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -83,8 +85,10 @@ export default function Dashboard({ user, onLogout }: { user: User; onLogout: ()
     setError(null);
     try {
       const d = await api.create();
+      if (!alive.current) return; // user left the dashboard meanwhile
       navigate(`#/doc/${d.id}`);
     } catch (e) {
+      if (!alive.current) return;
       setError(e instanceof ApiError ? e.message : "Could not create document");
       setBusy(false);
     }
@@ -101,8 +105,10 @@ export default function Dashboard({ user, onLogout }: { user: User; onLogout: ()
     try {
       const text = await file.text();
       const d = await api.importFile(file.name, text);
+      if (!alive.current) return;
       navigate(`#/doc/${d.id}`);
     } catch (err) {
+      if (!alive.current) return;
       setImportError(err instanceof ApiError ? err.message : "Could not read that file");
       setBusy(false);
     }
