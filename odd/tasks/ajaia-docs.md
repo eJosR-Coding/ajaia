@@ -8,7 +8,7 @@ Authorized scope: local code, tests, docs in this repo. NOT authorized: Supabase
 ## Tasks
 - [x] T1 Backend core (TDD): security, sanitize, importers, policy, services, repos, routes, main, deps, fakes, 4 test files
 - [x] T2 DB: db/schema.sql, db/seed.py, .env.example, requirements*.txt, api/index.py, vercel.json
-- [ ] T3 Frontend: Vite+React+TS+TipTap (Login, Dashboard, Editor, ShareDialog, api.ts), build passes
+- [x] T3 Frontend: Vite+React+TS+TipTap (Login, Dashboard, Editor, ShareDialog, api.ts), build passes
 - [x] T4 Stretch: version history (only if time)
 - [ ] T5 Docs: ARCHITECTURE.md, AI_WORKFLOW.md, SUBMISSION.md, VIDEO_URL.txt (user reviews)
 - [ ] T6 Deploy (blocked on user: Supabase + Vercel credentials)
