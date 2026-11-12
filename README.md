@@ -3,7 +3,7 @@
 A small full-stack document editor inspired by Google Docs: create and edit rich-text
 documents, import Markdown/text files, and share documents with other users.
 
-- **Live app:** <LIVE_URL>
+- **Live app:** https://ajaia-docs-gray.vercel.app
 - **Walkthrough video:** see `VIDEO_URL.txt`
 - **Architecture note:** [`ARCHITECTURE.md`](./ARCHITECTURE.md)
 - **AI workflow note:** [`AI_WORKFLOW.md`](./AI_WORKFLOW.md)
@@ -113,7 +113,7 @@ repositories for in-memory ones.
    Run `db/schema.sql` in the SQL editor, then run `python -m db.seed` locally against that database.
 2. **Vercel:** import the repository. Set `DATABASE_URL` (pooler URL), `SESSION_SECRET`
    and `COOKIE_SECURE=true`. The function region is pinned in `vercel.json` to match Supabase.
-3. Verify `GET <LIVE_URL>/api/health` returns `{"status":"ok","db":"ok"}`.
+3. Verify `GET https://ajaia-docs-gray.vercel.app/api/health` returns `{"status":"ok","db":"ok"}`.
 
 > **Note for reviewers:** Supabase free-tier projects pause after a period of inactivity.
 > If the app reports a database error, contact me and I will resume it within minutes.
