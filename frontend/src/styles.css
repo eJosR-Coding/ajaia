@@ -115,8 +115,11 @@ section h2 { font-size: 1.05rem; color: var(--muted); font-weight: 600; text-tra
 .paper:focus-within { box-shadow: 0 0 0 2px var(--accent); }
 
 /* dialog + side panel */
-.overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: grid; place-items: center; padding: 1rem; z-index: 20; }
-.dialog { width: min(440px, 100%); max-height: 85vh; overflow: auto; }
+dialog.dialog { width: min(440px, calc(100% - 2rem)); max-height: 85vh; overflow: auto; padding: 0; margin: auto; color: var(--text); }
+dialog.dialog::backdrop { background: rgba(0,0,0,.45); }
+.dialog-body { padding: 1.75rem; }
+[tabindex="-1"]:focus { outline: none; }
+.confirm-row { display: flex; gap: .4rem; }
 .dialog-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
 .dialog-head h2 { margin: 0; }
 .row { display: flex; gap: .5rem; }

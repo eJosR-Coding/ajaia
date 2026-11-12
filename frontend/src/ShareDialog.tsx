@@ -8,20 +8,20 @@ export default function ShareDialog({ docId, onClose }: { docId: number; onClose
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
     api.shares(docId)
       .then(setShares)
       .catch((e) => setError(e instanceof ApiError ? e.message : "Could not load shares"))
       .finally(() => setLoading(false));
-    inputRef.current?.focus();
   }, [docId]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    const d = dialogRef.current;
+    if (d && !d.open) d.showModal(); // guard: strict mode runs effects twice and showModal throws if already open
+    inputRef.current?.focus();
+  }, []);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -43,12 +43,15 @@ export default function ShareDialog({ docId, onClose }: { docId: number; onClose
   }
 
   return (
-    <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="card dialog" role="dialog" aria-modal="true" aria-labelledby="share-title">
+    <dialog ref={dialogRef} className="card dialog" aria-labelledby="share-title"
+      onClose={onClose}
+      onClick={(e) => { if (e.target === e.currentTarget) dialogRef.current?.close(); }}>
+      <div className="dialog-body">
         <div className="dialog-head">
           <h2 id="share-title">Share document</h2>
-          <button onClick={onClose} aria-label="Close share dialog">Close</button>
+          <button onClick={() => dialogRef.current?.close()} aria-label="Close share dialog">Close</button>
         </div>
+        <p className="hint">People you share with can read and edit this document.</p>
         <form onSubmit={submit}>
           <label htmlFor="share-email">Add person by email</label>
           <div className="row">
@@ -73,6 +76,6 @@ export default function ShareDialog({ docId, onClose }: { docId: number; onClose
           </ul>
         )}
       </div>
-    </div>
+    </dialog>
   );
 }

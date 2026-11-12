@@ -345,6 +345,9 @@ function VersionsDialog({ docId, busy, onClose, onRestored }: {
   const [versions, setVersions] = useState<VersionMeta[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [working, setWorking] = useState<number | null>(null);
+  const [confirming, setConfirming] = useState<number | null>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
     api.versions(docId).then(setVersions)
@@ -352,25 +355,29 @@ function VersionsDialog({ docId, busy, onClose, onRestored }: {
   }, [docId]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    const d = dialogRef.current;
+    if (d && !d.open) d.showModal(); // guard: strict mode runs effects twice and showModal throws if already open
+    headingRef.current?.focus();
+  }, []);
 
   async function restore(v: VersionMeta) {
-    if (!window.confirm("Restore this version? The current text will be replaced.")) return;
     setWorking(v.id);
     setError(null);
-    try { onRestored(await api.restore(docId, v.id)); }
-    catch (e) { setError(e instanceof ApiError ? e.message : "Restore failed"); setWorking(null); }
+    try {
+      const d = await api.restore(docId, v.id);
+      dialogRef.current?.close(); // close natively first so focus goes back to the opener
+      onRestored(d);
+    } catch (e) { setError(e instanceof ApiError ? e.message : "Restore failed"); setWorking(null); setConfirming(null); }
   }
 
   return (
-    <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="card dialog" role="dialog" aria-modal="true" aria-labelledby="hist-title">
+    <dialog ref={dialogRef} className="card dialog" aria-labelledby="hist-title"
+      onClose={onClose}
+      onClick={(e) => { if (e.target === e.currentTarget) dialogRef.current?.close(); }}>
+      <div className="dialog-body">
         <div className="dialog-head">
-          <h2 id="hist-title">Version history</h2>
-          <button onClick={onClose} aria-label="Close version history">Close</button>
+          <h2 id="hist-title" ref={headingRef} tabIndex={-1}>Version history</h2>
+          <button onClick={() => dialogRef.current?.close()} aria-label="Close version history">Close</button>
         </div>
         {error && <p className="error" role="alert">{error}</p>}
         {busy && <p className="muted">Restore is available once saving finishes.</p>}
@@ -381,14 +388,22 @@ function VersionsDialog({ docId, busy, onClose, onRestored }: {
             {versions.map((v) => (
               <li key={v.id}>
                 <span>{new Date(v.created_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</span>
-                <button disabled={busy || working !== null} onClick={() => restore(v)}>
-                  {working === v.id ? "Restoring..." : "Restore"}
-                </button>
+                {confirming === v.id ? (
+                  <span className="confirm-row">
+                    <button className="primary" disabled={busy || working !== null} onClick={() => restore(v)}>
+                      {working === v.id ? "Restoring..." : "Confirm restore"}
+                    </button>
+                    <button disabled={working !== null} onClick={() => setConfirming(null)}>Cancel</button>
+                  </span>
+                ) : (
+                  <button disabled={busy || working !== null} onClick={() => setConfirming(v.id)}>Restore</button>
+                )}
               </li>
             ))}
           </ul>
         )}
+        {confirming !== null && <p className="muted" role="status">Restoring replaces the current text with this version.</p>}
       </div>
-    </div>
+    </dialog>
   );
 }
