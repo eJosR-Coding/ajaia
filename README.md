@@ -120,6 +120,12 @@ repositories for in-memory ones.
 
 ---
 
+## CI/CD
+
+`.github/workflows/ci.yml` runs `pytest` and the frontend build on every push to `dev`/`main` and on pull requests. `deploy.yml` deploys to Vercel production after CI passes on `main`; it needs the repo secrets `VERCEL_TOKEN`, `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID`.
+
+---
+
 ## API
 
 ```
@@ -180,4 +186,4 @@ tests/
 2. `.docx` import via `mammoth`.
 3. Real-time collaboration with Yjs on a small stateful WebSocket service; the `revision` model becomes the persistence layer for snapshots.
 4. ETag / `If-Match` headers instead of the revision in the request body (HTTP-native optimistic locking).
-5. CI with GitHub Actions running `pytest` and a frontend build on every push.
+5. Preview deployments per pull request.
