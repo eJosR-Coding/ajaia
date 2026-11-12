@@ -2,6 +2,11 @@ name: Deploy
 
 # Runs only after CI passes on main. Needs repo secrets:
 # VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID (see .vercel/project.json locally).
+# one prod deploy at a time, queued ones wait instead of killing a running deploy
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
 on:
   workflow_run:
     workflows: [CI]
