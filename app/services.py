@@ -1,6 +1,7 @@
 """Business logic: documents, sharing, import. No HTTP, no SQL in here."""
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import PurePosixPath
@@ -10,6 +11,8 @@ from app.importers import IMPORTERS, derive_title
 from app.models import Document, User, Version
 from app.policy import can
 from app.sanitize import clean_html
+
+log = logging.getLogger(__name__)
 
 MAX_IMPORT_BYTES = 2 * 1024 * 1024
 SNAPSHOT_EVERY = timedelta(minutes=5)
@@ -64,7 +67,11 @@ class DocumentService:
         saved = self.docs.update_content(doc_id, clean_html(content_html), revision)
         if saved is None:
             raise conflict()
-        self._snapshot(before)
+        try:
+            self._snapshot(before)
+        except Exception:
+            # save already committed, history is a nice-to-have so don't tank the request
+            log.exception("version snapshot failed for doc %s", before.id)
         return saved
 
     def _snapshot(self, before: Document) -> None:
