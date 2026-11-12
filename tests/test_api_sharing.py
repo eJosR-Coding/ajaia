@@ -117,3 +117,51 @@ def test_versions_endpoints(app):
     r = alice.post(f"/api/documents/{doc['id']}/versions/{versions[0]['id']}/restore")
     assert r.status_code == 200 and r.json()["content_html"] == "<p>one</p>"
     assert carol.get(f"/api/documents/{doc['id']}/versions").status_code == 404
+
+
+def _doc_with_version(app, repos, html="<p>one</p>"):
+    """Owner doc with exactly one stored snapshot; returns (alice client, doc id, version id)."""
+    alice = login(app, "alice@demo.com")
+    doc = alice.post("/api/documents", json={}).json()
+    v = repos.docs.add_version(doc["id"], "Old title", html)
+    return alice, doc["id"], v.id
+
+
+def test_get_version_owner_reads_content(app, repos):
+    alice, doc_id, vid = _doc_with_version(app, repos)
+    r = alice.get(f"/api/documents/{doc_id}/versions/{vid}")
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body) == {"id", "title", "created_at", "content_html"}
+    assert body["id"] == vid and body["title"] == "Old title" and body["content_html"] == "<p>one</p>"
+
+
+def test_get_version_shared_user_can_read(app, repos):
+    alice, doc_id, vid = _doc_with_version(app, repos)
+    alice.post(f"/api/documents/{doc_id}/shares", json={"email": "bob@demo.com"})
+    bob = login(app, "bob@demo.com")
+    assert bob.get(f"/api/documents/{doc_id}/versions/{vid}").json()["content_html"] == "<p>one</p>"
+
+
+def test_get_version_stranger_gets_404(app, repos):
+    _, doc_id, vid = _doc_with_version(app, repos)
+    r = login(app, "carol@demo.com").get(f"/api/documents/{doc_id}/versions/{vid}")
+    assert r.status_code == 404 and r.json()["error"]["code"] == "not_found"
+
+
+def test_get_version_from_another_document_gets_404(app, repos):
+    alice, doc_id, _ = _doc_with_version(app, repos)
+    other = alice.post("/api/documents", json={}).json()
+    foreign = repos.docs.add_version(other["id"], "Other", "<p>secret</p>")
+    r = alice.get(f"/api/documents/{doc_id}/versions/{foreign.id}")
+    assert r.status_code == 404 and r.json()["error"]["code"] == "not_found"
+    assert alice.get(f"/api/documents/{doc_id}/versions/9999").status_code == 404
+
+
+def test_get_version_strips_scripts_on_read(app, repos):
+    # simulate a legacy row that skipped the write-time sanitizer
+    alice, doc_id, vid = _doc_with_version(
+        app, repos, '<p onclick="x()">hi</p><script>alert(1)</script>')
+    html = alice.get(f"/api/documents/{doc_id}/versions/{vid}").json()["content_html"]
+    assert "<script" not in html and "alert" not in html and "onclick" not in html
+    assert "hi" in html

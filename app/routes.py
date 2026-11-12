@@ -134,6 +134,14 @@ def list_versions(doc_id: int, user: User = Depends(current_user), svc=Depends(g
             for v in svc.list_versions(user, doc_id)]
 
 
+@router.get("/documents/{doc_id}/versions/{version_id}")
+def get_version(doc_id: int, version_id: int, user: User = Depends(current_user),
+                svc=Depends(get_service)):
+    v = svc.get_version(user, doc_id, version_id)
+    return {"id": v.id, "title": v.title, "created_at": v.created_at.isoformat(),
+            "content_html": v.content_html}
+
+
 @router.post("/documents/{doc_id}/versions/{version_id}/restore")
 def restore_version(doc_id: int, version_id: int, user: User = Depends(current_user),
                     svc=Depends(get_service)):
