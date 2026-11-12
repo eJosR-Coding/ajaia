@@ -22,3 +22,4 @@ T5 docs on feat/docs (user reviews)
 T6: deployed https://ajaia-docs-gray.vercel.app (Vercel prod + new Supabase ajaia-docs, us-east-1). Live smoke: health ok, login x3, owned/shared, share->404 to 200, stale PUT 409, import md, .exe 415. vercel.json needs framework=vite (autodetect picked FastAPI and 404'd root).
 - [x] T7 Impeccable P1 fixes: conflict recovery keeps local edit + sticky banner + visible status; dialogs via native <dialog> (focus trap/return, no global Esc), in-dialog restore confirm. No frontend test runner (TDD n/a: verify by tsc+build+manual/live smoke)
 - [x] T8 Editorial minimalist redesign (iminimalist-ui + impeccable typeset/layout/adapt): identity, type pairing, 2-tier editor header, dashboard rows, h1s, 44px targets. Verify: tsc+build, detector, preview deploy
+- [x] T9 Version preview: GET /documents/{id}/versions/{vid} (content_html, TDD) + clickable history rows with read-only preview and restore from preview
