@@ -55,3 +55,39 @@ def test_validate_rejects_empty():
 
 def test_validate_ok():
     assert validate_import("A.MD", "# hi") == ".md"
+
+
+# --- HTTP level ---
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app import deps  # noqa: E402
+from app.deps import Settings  # noqa: E402
+from app.main import create_app  # noqa: E402
+from tests.fakes import FakeRepos  # noqa: E402
+
+
+@pytest.fixture
+def client():
+    repos = FakeRepos()
+    app = create_app()
+    app.dependency_overrides[deps.get_repos] = lambda: repos
+    app.dependency_overrides[deps.get_settings] = lambda: Settings("", "s", False)
+    c = TestClient(app)
+    c.post("/api/auth/login", json={"email": "alice@demo.com", "password": "demo1234"})
+    return c
+
+
+def test_http_import_markdown(client):
+    r = client.post("/api/documents/import", json={"filename": "plan.md", "text": "# Plan\n\n- a\n- b"})
+    assert r.status_code == 201
+    body = r.json()
+    assert body["title"] == "Plan" and "<ul>" in body["content_html"]
+
+
+def test_http_import_rejections(client):
+    r = client.post("/api/documents/import", json={"filename": "a.docx", "text": "x"})
+    assert r.status_code == 415 and r.json()["error"]["code"] == "unsupported_type"
+    r = client.post("/api/documents/import", json={"filename": "a.txt", "text": "x" * (MAX + 1)})
+    assert r.status_code == 413
+    r = client.post("/api/documents/import", json={"filename": "a.txt", "text": ""})
+    assert r.status_code == 400
