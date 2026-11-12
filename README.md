@@ -95,6 +95,8 @@ npm run dev                      # http://localhost:5173
 pytest
 ```
 
+Frontend: `cd frontend && npm test` runs vitest (node env, no browser).
+
 Tests run **without a database**: FastAPI's `dependency_overrides` swaps the Postgres
 repositories for in-memory ones.
 

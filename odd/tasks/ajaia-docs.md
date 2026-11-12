@@ -23,3 +23,9 @@ T6: deployed https://ajaia-docs-gray.vercel.app (Vercel prod + new Supabase ajai
 - [x] T7 Impeccable P1 fixes: conflict recovery keeps local edit + sticky banner + visible status; dialogs via native <dialog> (focus trap/return, no global Esc), in-dialog restore confirm. No frontend test runner (TDD n/a: verify by tsc+build+manual/live smoke)
 - [x] T8 Editorial minimalist redesign (iminimalist-ui + impeccable typeset/layout/adapt): identity, type pairing, 2-tier editor header, dashboard rows, h1s, 44px targets. Verify: tsc+build, detector, preview deploy
 - [x] T9 Version preview: GET /documents/{id}/versions/{vid} (content_html, TDD) + clickable history rows with read-only preview and restore from preview
+
+## State-machine audit refactor (user chose phases 1-4 + quick wins)
+- [ ] T10 Phase 1: vitest + smoke test + CI step (branch feat/test-tooling)
+- [ ] T11 Quick wins: backend _snapshot best-effort (F5, TDD) + Dashboard double-create guard (F8) (branch feat/quick-wins)
+- [ ] T12 Phase 3: pure saveMachine.ts transition/selectors + tests, not wired (branch feat/save-machine)
+- [ ] T13 Phase 4: wire useSaveMachine into EditorBody, UI identical; fixes F1, F4 (branch feat/save-machine)
