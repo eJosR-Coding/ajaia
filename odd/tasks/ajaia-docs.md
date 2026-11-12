@@ -31,5 +31,5 @@ T6: deployed https://ajaia-docs-gray.vercel.app (Vercel prod + new Supabase ajai
 - [x] T13 Phase 4: wire useSaveMachine into EditorBody, UI identical; fixes F1, F4 (branch feat/save-machine)
 
 ## Race audit follow-up (user approved steps 1 and 4 only)
-- [ ] T14 N1: after an ambiguous save failure (lost response), a later 409 is verified against the server content; identical content = success (branch feat/n1-self-conflict, TDD in saveMachine.test.ts)
-- [ ] T15 N5/N6/N9: alive guards in ShareDialog and Dashboard, concurrency key in deploy.yml (branch feat/race-guards; no jsdom so no component tests, say so)
+- [x] T14 N1: after an ambiguous save failure (lost response), a later 409 is verified against the server content; identical content = success (branch feat/n1-self-conflict, TDD in saveMachine.test.ts)
+- [x] T15 N5/N6/N9: alive guards in ShareDialog and Dashboard, concurrency key in deploy.yml (branch feat/race-guards; no jsdom so no component tests, say so)
