@@ -141,6 +141,7 @@ POST   /api/documents/import          {filename, text}           -> new document
 GET    /api/documents/{id}/shares     (owner only)
 POST   /api/documents/{id}/shares     {email}
 GET    /api/documents/{id}/versions                   (stretch)
+GET    /api/documents/{id}/versions/{vid}             (stretch, content for preview)
 POST   /api/documents/{id}/versions/{vid}/restore     (stretch)
 GET    /api/health
 ```

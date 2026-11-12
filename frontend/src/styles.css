@@ -159,6 +159,29 @@ section h2 { display: flex; align-items: baseline; gap: .6rem; font-size: 1.3rem
 /* dialog + side panel */
 dialog.dialog { width: min(440px, calc(100% - 2rem)); max-height: 85vh; overflow: auto; padding: 0; margin: auto; color: var(--text); }
 dialog.dialog::backdrop { background: var(--scrim); }
+/* history dialog: list + preview side by side, stacked on narrow screens */
+dialog.dialog.dialog-wide { width: min(880px, calc(100% - 2rem)); }
+.history { display: grid; grid-template-columns: minmax(11rem, 14rem) minmax(0, 1fr); gap: 1.25rem; align-items: start; }
+.history-list { margin: 0; max-height: 60vh; overflow: auto; }
+.history-list li { padding: 0; display: block; }
+.history-row { width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: .1rem; text-align: left; border-color: transparent; border-radius: 0; padding: .55rem .6rem; min-height: var(--tap); }
+.history-row:hover:not(:disabled) { background: var(--accent-soft); border-color: transparent; }
+.history-row[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.history-n { font-size: .8rem; font-variant-numeric: tabular-nums; }
+.preview-head h3 { margin-bottom: .1rem; }
+.preview-meta { margin: 0 0 .4rem; font-size: .85rem; }
+.preview-note { margin: 0 0 .5rem; font-size: .85rem; color: var(--ok); }
+.preview-paper { border: 1px solid var(--border); border-radius: var(--radius); min-height: 0; max-height: 50vh; overflow: auto; cursor: default; padding: 1.25rem 1.5rem; font-family: var(--font-serif); font-size: 1.05rem; line-height: 1.7; }
+.preview-paper p { margin: 0 0 1em; }
+.preview-paper h1 { font-size: 1.8rem; margin: 1.2em 0 .5em; }
+.preview-paper h2 { font-size: 1.4rem; margin: 1.2em 0 .45em; }
+.preview-paper > :first-child { margin-top: 0; }
+.preview-paper ul, .preview-paper ol { padding-left: 1.6rem; margin: 0 0 1em; }
+.preview-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem; margin-top: .75rem; }
+@media (max-width: 640px) {
+  .history { grid-template-columns: 1fr; }
+  .history-list { max-height: 11rem; }
+}
 .dialog-body { padding: 1.75rem; }
 [tabindex="-1"]:focus { outline: none; }
 .confirm-row { display: flex; gap: .4rem; }

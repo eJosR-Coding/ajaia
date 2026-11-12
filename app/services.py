@@ -1,6 +1,7 @@
 """Business logic: documents, sharing, import. No HTTP, no SQL in here."""
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import PurePosixPath
 
@@ -98,6 +99,14 @@ class DocumentService:
     def list_versions(self, user: User, doc_id: int) -> list[Version]:
         self._load(user, doc_id, "read")
         return self.docs.list_versions(doc_id)
+
+    def get_version(self, user: User, doc_id: int, version_id: int) -> Version:
+        self._load(user, doc_id, "read")
+        v = self.docs.get_version(doc_id, version_id)  # repo scopes by doc id, so foreign ids miss
+        if v is None:
+            raise not_found()
+        # defense in depth: re-sanitize on read even though writes already did
+        return replace(v, content_html=clean_html(v.content_html))
 
     def restore_version(self, user: User, doc_id: int, version_id: int) -> Document:
         doc = self._load(user, doc_id, "write")
