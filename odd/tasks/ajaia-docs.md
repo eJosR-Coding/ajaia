@@ -10,7 +10,7 @@ Authorized scope: local code, tests, docs in this repo. NOT authorized: Supabase
 - [x] T2 DB: db/schema.sql, db/seed.py, .env.example, requirements*.txt, api/index.py, vercel.json
 - [x] T3 Frontend: Vite+React+TS+TipTap (Login, Dashboard, Editor, ShareDialog, api.ts), build passes
 - [x] T4 Stretch: version history (only if time)
-- [ ] T5 Docs: ARCHITECTURE.md, AI_WORKFLOW.md, SUBMISSION.md, VIDEO_URL.txt (user reviews)
+- [x] T5 Docs: ARCHITECTURE.md, AI_WORKFLOW.md, SUBMISSION.md, VIDEO_URL.txt (user reviews)
 - [x] T6 Deploy (blocked on user: Supabase + Vercel credentials)
 
 ## Evidence
