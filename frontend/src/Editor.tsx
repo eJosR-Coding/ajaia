@@ -1,14 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { EditorContent, useEditor, Editor as TipTap } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import { api, ApiError, Doc, User, VersionDetail, VersionMeta } from "./api";
 import { navigate } from "./App";
+import { hasUnsaved, isBusy, statusLabel } from "./saveMachine";
+import { useSaveMachine } from "./useSaveMachine";
 import ShareDialog from "./ShareDialog";
 import Wordmark from "./Wordmark";
-
-type Status = "idle" | "saving" | "saved" | "error" | "conflict";
-const AUTOSAVE_MS = 1000;
 
 // wrapper: fetch the doc first so TipTap boots with real content (no flash of empty editor)
 export default function EditorPage({ docId, user, onLogout }: { docId: number; user: User; onLogout: () => void }) {
@@ -92,135 +91,38 @@ function EditorBody({ initial }: { initial: Doc }) {
   const id = initial.id;
   const [title, setTitle] = useState(initial.title);
   const [titleError, setTitleError] = useState<string | null>(null);
-  const [status, setStatus] = useState<Status>("idle");
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [conflict, setConflict] = useState(false);
-  // "my version": local html that lost a 409 race. stays recoverable until the user dismisses it
-  const [mine, setMine] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null); // reload failures, not part of the save machine
   const [sharing, setSharing] = useState(false);
   const [showVersions, setShowVersions] = useState(false);
 
-  // refs hold the mutable save machinery so re-renders never mess with timers
-  const revision = useRef(initial.revision);
   const savedTitle = useRef(initial.title);
-  const timer = useRef<number | null>(null);
-  const inflight = useRef(false);
-  const queued = useRef(false);
-  const conflictRef = useRef(false);
-  const latestHtml = useRef(initial.content_html);
-  const lastSavedHtml = useRef(initial.content_html);
   const editorRef = useRef<TipTap | null>(null);
-
-  // resolves true when the doc is in sync with the server afterwards
-  const save = useCallback(async (): Promise<boolean> => {
-    const editor = editorRef.current;
-    if (!editor || conflictRef.current) return false;
-    if (inflight.current) { queued.current = true; return false; } // one request at a time, no revision races
-    const html = editor.getHTML();
-    if (html === lastSavedHtml.current) { setStatus("saved"); return true; }
-    inflight.current = true;
-    setStatus("saving");
-    try {
-      const res = await api.save(id, html, revision.current);
-      revision.current = res.revision;
-      lastSavedHtml.current = html;
-      setSaveError(null);
-      setStatus("saved");
-      return true;
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 409) {
-        // someone else won the race. do NOT overwrite, stash our version so nothing is lost
-        conflictRef.current = true;
-        setMine(html);
-        setConflict(true);
-        setStatus("conflict");
-      } else {
-        setSaveError(e instanceof ApiError ? e.message : "Save failed");
-        setStatus("error");
-      }
-      return false;
-    } finally {
-      inflight.current = false;
-      if (queued.current && !conflictRef.current) { queued.current = false; void save(); }
-      else queued.current = false;
-    }
-  }, [id]);
-
-  const schedule = useCallback(() => {
-    if (conflictRef.current) return;
-    if (timer.current) window.clearTimeout(timer.current);
-    setStatus("saving");
-    timer.current = window.setTimeout(() => { timer.current = null; void save(); }, AUTOSAVE_MS);
-  }, [save]);
+  const { model, modelRef, dispatch, edit, latest } = useSaveMachine({
+    id, initial, editorRef,
+    onServerDoc: (d) => { savedTitle.current = d.title; setTitle(d.title); },
+  });
+  const { save, stash } = model;
+  const status = statusLabel(model);
+  const mine = save.t === "conflict" ? save.mine : stash;
+  const saveError = save.t === "error" ? save.message
+    : save.t === "conflict" && typeof save.resync === "object" ? save.resync.error : actionError;
 
   const editor = useEditor({
     extensions: [StarterKit, Underline],
     content: initial.content_html,
     editorProps: { attributes: { "aria-label": "Document body", role: "textbox", "aria-multiline": "true" } },
-    onUpdate: ({ editor }) => {
-      latestHtml.current = editor.getHTML();
-      if (conflictRef.current) setMine(latestHtml.current); // keep stashing edits made during a conflict
-      schedule();
-    },
+    onUpdate: ({ editor }) => edit(editor.getHTML()),
   });
   editorRef.current = editor;
 
-  // flush a pending save when leaving the page so the last keystrokes survive
   useEffect(() => {
-    return () => {
-      if (timer.current) {
-        window.clearTimeout(timer.current);
-        if (!conflictRef.current && latestHtml.current !== lastSavedHtml.current) {
-          api.save(id, latestHtml.current, revision.current).catch(() => {});
-        }
-      }
-    };
-  }, [id]);
-
-  useEffect(() => {
-    const warn = (e: BeforeUnloadEvent) => {
-      if (timer.current || inflight.current || status === "error") e.preventDefault();
-    };
+    const warn = (e: BeforeUnloadEvent) => { if (hasUnsaved(modelRef.current)) e.preventDefault(); };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [status]);
+  }, [modelRef]);
 
-  function applyServerDoc(d: Doc) {
-    if (timer.current) { window.clearTimeout(timer.current); timer.current = null; }
-    queued.current = false;
-    revision.current = d.revision;
-    lastSavedHtml.current = d.content_html;
-    latestHtml.current = d.content_html;
-    savedTitle.current = d.title;
-    setTitle(d.title);
-    editor?.commands.setContent(d.content_html, false); // false = don't fire onUpdate, we're not dirty
-    conflictRef.current = false;
-    setConflict(false);
-    setSaveError(null);
-    setStatus("saved");
-  }
-
-  // re-base onto the server revision but keep local content, so the next save overwrites on purpose
-  async function keepMine() {
-    if (mine === null || !editor) return;
-    try {
-      const d = await api.get(id);
-      if (timer.current) { window.clearTimeout(timer.current); timer.current = null; }
-      queued.current = false;
-      revision.current = d.revision;
-      lastSavedHtml.current = d.content_html;
-      savedTitle.current = d.title;
-      setTitle(d.title);
-      editor.commands.setContent(mine, false);
-      latestHtml.current = editor.getHTML();
-      conflictRef.current = false;
-      setConflict(false);
-      setSaveError(null);
-      if (await save()) setMine(null);
-    } catch (e) {
-      setSaveError(e instanceof ApiError ? e.message : "Could not re-sync with the latest version");
-    }
-  }
+  // the server doc replaced ours (reload / restore): title follows, the machine handles the rest
+  function applyServerTitle(d: Doc) { savedTitle.current = d.title; setTitle(d.title); }
 
   async function copyMine() {
     if (mine === null) return false;
@@ -229,8 +131,13 @@ function EditorBody({ initial }: { initial: Doc }) {
   }
 
   async function reload() {
-    try { applyServerDoc(await api.get(id)); }
-    catch (e) { setSaveError(e instanceof ApiError ? e.message : "Reload failed"); }
+    setActionError(null);
+    try {
+      const d = await api.get(id);
+      const before = modelRef.current.epoch;
+      dispatch({ type: "RELOAD_OK", doc: d });
+      if (modelRef.current.epoch !== before) applyServerTitle(d); // ignored (e.g. keep-mine in flight) = leave title alone
+    } catch (e) { setActionError(e instanceof ApiError ? e.message : "Reload failed"); }
   }
 
   async function commitTitle() {
@@ -271,7 +178,7 @@ function EditorBody({ initial }: { initial: Doc }) {
             {status === "saved" && "Saved"}
             {status === "conflict" && "Not saved - conflict"}
             {status === "error" && (
-              <>Error <button className="link" onClick={() => void save()}>Retry</button></>
+              <>Error <button className="link" onClick={() => dispatch({ type: "RETRY" })}>Retry</button></>
             )}
           </span>
           <button onClick={() => setShowVersions(true)}>History</button>
@@ -285,7 +192,7 @@ function EditorBody({ initial }: { initial: Doc }) {
       <div className="editor-shell">
         <div className="sticky-stack">
           {editor && <Toolbar editor={editor} />}
-          {conflict && (
+          {save.t === "conflict" && (
             <div className="banner" role="alert">
               <div className="banner-main">
                 <strong>This document was changed elsewhere.</strong>
@@ -293,14 +200,14 @@ function EditorBody({ initial }: { initial: Doc }) {
               </div>
               <div className="banner-actions">
                 <button onClick={reload}>Reload latest</button>
-                <button onClick={keepMine}>Keep editing mine</button>
+                <button onClick={() => dispatch({ type: "KEEP_MINE" })}>Keep editing mine</button>
               </div>
-              {mine !== null && <MineVersion html={mine} onCopy={copyMine} defaultOpen />}
+              <MineVersion html={save.mine} onCopy={copyMine} defaultOpen />
             </div>
           )}
-          {!conflict && mine !== null && (
+          {save.t !== "conflict" && stash !== null && (
             <div className="banner quiet" role="region" aria-label="Your unsaved version">
-              <MineVersion html={mine} onCopy={copyMine} onDismiss={() => setMine(null)} />
+              <MineVersion html={stash} onCopy={copyMine} onDismiss={() => dispatch({ type: "DISMISS_STASH" })} />
             </div>
           )}
         </div>
@@ -310,9 +217,9 @@ function EditorBody({ initial }: { initial: Doc }) {
       </div>
       {sharing && <ShareDialog docId={id} onClose={() => setSharing(false)} />}
       {showVersions && (
-        <VersionsDialog docId={id} busy={status === "saving" || conflict} currentHtml={latestHtml.current}
+        <VersionsDialog docId={id} busy={isBusy(model)} currentHtml={latest.current}
           onClose={() => setShowVersions(false)}
-          onRestored={(d) => { applyServerDoc(d); setShowVersions(false); }} />
+          onRestored={(d) => { applyServerTitle(d); dispatch({ type: "RESTORE_OK", doc: d, latest: latest.current }); setShowVersions(false); }} />
       )}
     </>
   );

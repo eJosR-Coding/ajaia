@@ -27,5 +27,5 @@ T6: deployed https://ajaia-docs-gray.vercel.app (Vercel prod + new Supabase ajai
 ## State-machine audit refactor (user chose phases 1-4 + quick wins)
 - [x] T10 Phase 1: vitest + smoke test + CI step (branch feat/test-tooling)
 - [x] T11 Quick wins: backend _snapshot best-effort (F5, TDD) + Dashboard double-create guard (F8) (branch feat/quick-wins)
-- [ ] T12 Phase 3: pure saveMachine.ts transition/selectors + tests, not wired (branch feat/save-machine)
-- [ ] T13 Phase 4: wire useSaveMachine into EditorBody, UI identical; fixes F1, F4 (branch feat/save-machine)
+- [x] T12 Phase 3: pure saveMachine.ts transition/selectors + tests, not wired (branch feat/save-machine)
+- [x] T13 Phase 4: wire useSaveMachine into EditorBody, UI identical; fixes F1, F4 (branch feat/save-machine)
