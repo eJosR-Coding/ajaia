@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { api, ApiError, User } from "./api";
+import { mergeShares } from "./mergeShares";
 
 export default function ShareDialog({ docId, onClose }: { docId: number; onClose: () => void }) {
   const [shares, setShares] = useState<User[]>([]);
@@ -11,10 +12,12 @@ export default function ShareDialog({ docId, onClose }: { docId: number; onClose
   const dialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
+    let alive = true; // docId changed or dialog gone: drop the late response
     api.shares(docId)
-      .then(setShares)
-      .catch((e) => setError(e instanceof ApiError ? e.message : "Could not load shares"))
-      .finally(() => setLoading(false));
+      .then((loaded) => { if (alive) setShares((cur) => mergeShares(cur, loaded)); }) // merge, a share added meanwhile must survive
+      .catch((e) => { if (alive) setError(e instanceof ApiError ? e.message : "Could not load shares"); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
   }, [docId]);
 
   useEffect(() => {
